@@ -7,6 +7,19 @@
 
 Interface graphique Tkinter pour créer des favicons et fichiers `.ico` à partir de zéro (fond + texte + forme), ou pour convertir un PNG existant en `.ico` multi-tailles. Aucun service en ligne, aucune dépendance réseau : tout le rendu se fait localement avec Pillow.
 
+## Aperçu
+
+<img src="images/icon-app.png" width="96" alt="Icône de l'application Ico Maker">
+
+Quelques exemples d'icônes réalisables avec l'application (fond + forme additionnelle + texte) :
+
+<p>
+  <img src="images/exemple-1.png" width="96" alt="Exemple : lettre simple sur fond arrondi, et cercle orange">
+  <img src="images/exemple-2-forme-etoile.png" width="96" alt="Exemple : forme étoile en transparence">
+  <img src="images/exemple-3-forme-hexagone.png" width="96" alt="Exemple : forme hexagone en transparence">
+  <img src="images/exemple-4.png" width="96" alt="Exemple : Jeu de police et de couleurs">
+</p>
+
 ## Téléchargement / Download
 
 - **Sans Python (recommandé pour la plupart des utilisateurs)** : téléchargez `IcoMaker.exe` depuis la page [Releases](../../releases) du dépôt et lancez-le directement.

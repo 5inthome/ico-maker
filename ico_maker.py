@@ -81,7 +81,7 @@ APP_VERSION = "1.0"
 # Laisser vide tant que le projet n'est pas publié ; renseigner l'URL du
 # dépôt (ex: "https://github.com/utilisateur/ico-maker") une fois le
 # code mis en ligne pour qu'elle apparaisse automatiquement ci-dessous.
-GITHUB_URL = ""
+GITHUB_URL = "https://github.com/5inthome/ico-maker"
 
 ICON_FILENAME = "Ico-maker.ico"
 
