@@ -2,12 +2,43 @@
 ico_maker.py
 Interface graphique Tkinter pour créer des favicons et fichiers .ico.
 
+Présentation
+------------
+L'icône est composée de trois couches dessinées sur un canevas interne
+de 256×256 (voir utils/renderer.py) :
+  1. Fond (forme + couleur + opacité)
+  2. Forme géométrique additionnelle, optionnelle (cercle, carré,
+     triangle, losange, pentagone, hexagone, étoile)
+  3. Texte (police, taille, couleur, opacité, décalage)
+
+L'interface est organisée en quatre onglets (Fond, Texte, Forme, Export)
+avec un aperçu en temps réel à droite. L'onglet Export permet d'exporter
+le rendu en .ico multi-tailles ou en .png, ainsi que de convertir un PNG
+existant en .ico sans repasser par l'éditeur.
+
+Fonctionnalités notables :
+  - saisie directe d'un code couleur hexadécimal (#rrggbb ou #rgb), en
+    plus du sélecteur de couleur classique ;
+  - détection des polices Adobe Fonts activées via Creative Cloud
+    Desktop, en complément des polices du registre Windows
+    (voir utils/font_utils.py) ;
+  - aperçu au survol dans la liste déroulante des polices, façon
+    Word/InDesign : déplacer la souris sur un nom de police met à jour
+    l'aperçu sans valider le choix (voir _enable_font_hover_preview,
+    qui s'appuie sur des mécanismes internes de Tcl/Tk).
+
+Une version conservant les messages de diagnostic [hover-debug] utilisés
+pour mettre au point l'aperçu au survol est archivée localement (non
+publiée dans le dépôt) sous le nom ico_maker_debug.py.
+
 Lancement :  python ico_maker.py
 Dépendances : Pillow  (pip install Pillow)
 """
 
 from __future__ import annotations
 
+import os
+import re
 import sys
 import tkinter as tk
 from tkinter import colorchooser, filedialog, messagebox, ttk
@@ -39,6 +70,60 @@ SHAPE_TYPES   = ["circle", "square", "triangle", "rhombus", "pentagon",
                  "hexagon", "star"]
 BG_SHAPES     = ["rounded", "square", "circle", "none"]
 ICO_SIZES     = [16, 24, 32, 48, 64, 128, 256]
+
+# Validation des codes couleur hexadécimaux saisis manuellement (#rrggbb ou #rgb)
+_HEX6_RE = re.compile(r"^[0-9A-Fa-f]{6}$")
+_HEX3_RE = re.compile(r"^[0-9A-Fa-f]{3}$")
+COLOR_INVALID_FG = "#f38ba8"
+
+# Informations affichées dans la boîte "À propos" (menu Aide).
+APP_VERSION = "1.0"
+# Laisser vide tant que le projet n'est pas publié ; renseigner l'URL du
+# dépôt (ex: "https://github.com/utilisateur/ico-maker") une fois le
+# code mis en ligne pour qu'elle apparaisse automatiquement ci-dessous.
+GITHUB_URL = ""
+
+ICON_FILENAME = "Ico-maker.ico"
+
+
+def _resource_path(name: str) -> Path:
+    """
+    Chemin absolu d'un fichier de ressource (ex: l'icône de l'appli),
+    qu'on soit lancé depuis le script source ou depuis l'exécutable
+    PyInstaller : dans ce dernier cas, les fichiers ajoutés via
+    --add-data sont extraits dans un dossier temporaire pointé par
+    `sys._MEIPASS`, qui n'existe pas en lancement normal.
+    """
+    base = Path(getattr(sys, "_MEIPASS", Path(__file__).parent))
+    return base / name
+
+
+def _downloads_dir() -> Path:
+    """
+    Dossier "Téléchargements" de l'utilisateur Windows. Lu depuis le
+    registre (Shell Folders, GUID FOLDERID_Downloads) pour respecter un
+    éventuel déplacement de ce dossier par l'utilisateur ; à défaut, on
+    retombe sur ~/Downloads, puis sur le dossier personnel.
+    """
+    try:
+        import winreg
+        key = winreg.OpenKey(
+            winreg.HKEY_CURRENT_USER,
+            r"SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Shell Folders",
+        )
+        try:
+            value, _ = winreg.QueryValueEx(
+                key, "{374DE290-123F-4565-9164-39C4925E467B}"
+            )
+        finally:
+            winreg.CloseKey(key)
+        path = Path(os.path.expandvars(value))
+        if path.is_dir():
+            return path
+    except Exception:
+        pass
+    fallback = Path.home() / "Downloads"
+    return fallback if fallback.is_dir() else Path.home()
 
 
 # ---------------------------------------------------------------------------
@@ -84,10 +169,19 @@ class IcoMakerApp(tk.Tk):
         self.title("Ico Maker")
         self.resizable(False, False)
         self.configure(bg=BG_PANEL)
+        try:
+            self.iconbitmap(default=str(_resource_path(ICON_FILENAME)))
+        except Exception:
+            # Pas bloquant : l'appli fonctionne normalement sans icône
+            # de fenêtre si le fichier .ico est introuvable.
+            pass
 
         self.renderer = IconRenderer()
         self._preview_image: Image.Image | None = None
         self._tk_image: ImageTk.PhotoImage | None = None
+        # Police survolée dans la liste déroulante (aperçu temporaire,
+        # sans valider le choix) ; None = on utilise self.text_font.
+        self._preview_font_override: str | None = None
 
         # ── Variables ──────────────────────────────────────────────────
         # Fond
@@ -128,6 +222,13 @@ class IcoMakerApp(tk.Tk):
     # ------------------------------------------------------------------
 
     def _build_ui(self):
+        # Barre de menu (Aide > À propos)
+        menubar = tk.Menu(self)
+        help_menu = tk.Menu(menubar, tearoff=False)
+        help_menu.add_command(label="À propos", command=self._show_about)
+        menubar.add_cascade(label="Aide", menu=help_menu)
+        self.config(menu=menubar)
+
         # Colonne gauche : contrôles
         left = tk.Frame(self, bg=BG_PANEL, padx=PAD, pady=PAD)
         left.grid(row=0, column=0, sticky="nsew")
@@ -203,6 +304,7 @@ class IcoMakerApp(tk.Tk):
                                        width=28, state="readonly")
         self.font_combo.pack(side="left")
         self.font_combo.bind("<<ComboboxSelected>>", lambda *_: self._update_preview())
+        self._enable_font_hover_preview(self.font_combo)
 
         self._slider_row(parent, "Taille", self.text_size, 8, 240)
 
@@ -337,14 +439,48 @@ class IcoMakerApp(tk.Tk):
         swatch.pack(side="left", padx=4)
         swatch.bind("<Button-1>", lambda *_: command())
 
+        # Champ de saisie du code couleur (#rrggbb ou #rgb), relié à color_var.
+        entry = tk.Entry(row, textvariable=color_var, bg="#313244",
+                         fg=FG_LABEL, insertbackground=FG_LABEL, width=9,
+                         relief="flat", font=("Consolas", 9))
+        entry.pack(side="left", padx=4)
+
         def refresh(*_):
             try:
                 swatch.config(bg=color_var.get())
+                entry.config(fg=FG_LABEL)
             except Exception:
-                pass
+                # Code en cours de saisie / invalide : pas de plantage,
+                # juste un retour visuel (texte en rouge) tant que ce
+                # n'est pas un code couleur Tk valide.
+                entry.config(fg=COLOR_INVALID_FG)
         color_var.trace_add("write", refresh)
-        tk.Label(row, textvariable=color_var, fg=FG_LABEL, bg=BG_SECTION,
-                 font=("Consolas", 9)).pack(side="left")
+
+        def _maybe_preview(*_):
+            # On ne tente le rendu que si le code est un hex complet à 6
+            # chiffres (#rrggbb). Le format court #rgb n'est compris que
+            # par _normalize (Entrée / perte de focus), qui le développe
+            # en #rrggbb et redéclenchera ce trace avec une valeur valide.
+            # Sans ce filtre, chaque touche tapée (champ vidé, code
+            # incomplet) provoquait une tentative de rendu qui échouait
+            # avec "invalid literal for int() with base 16: ''".
+            val = color_var.get().strip().lstrip("#")
+            if _HEX6_RE.fullmatch(val):
+                self._schedule_preview()
+        color_var.trace_add("write", _maybe_preview)
+
+        def _normalize(_event=None):
+            """Au Entrée/perte de focus : ajoute le '#' et complète
+            la notation courte #rgb -> #rrggbb si besoin."""
+            val = color_var.get().strip().lstrip("#")
+            if _HEX6_RE.fullmatch(val):
+                color_var.set("#" + val.lower())
+            elif _HEX3_RE.fullmatch(val):
+                color_var.set("#" + "".join(c * 2 for c in val.lower()))
+            # Sinon : on laisse tel quel, refresh() signalera l'erreur.
+
+        entry.bind("<Return>", _normalize)
+        entry.bind("<FocusOut>", _normalize)
         refresh()
 
     # ------------------------------------------------------------------
@@ -364,6 +500,24 @@ class IcoMakerApp(tk.Tk):
     def _pick_shape_color(self): self._pick_color(self.shape_color)
 
     # ------------------------------------------------------------------
+    # À propos
+    # ------------------------------------------------------------------
+
+    def _show_about(self):
+        lines = [
+            "Ico Maker",
+            f"Version {APP_VERSION}",
+            "",
+            "Création de favicons et fichiers .ico (fond, texte, forme) ",
+            "et conversion d'images PNG en .ico multi-tailles.",
+            "",
+            "Réalisé avec Python, Tkinter et Pillow.",
+        ]
+        if GITHUB_URL:
+            lines += ["", GITHUB_URL]
+        messagebox.showinfo("À propos d'Ico Maker", "\n".join(lines))
+
+    # ------------------------------------------------------------------
     # Polices
     # ------------------------------------------------------------------
 
@@ -378,8 +532,103 @@ class IcoMakerApp(tk.Tk):
             self.text_font.set(default)
 
     # ------------------------------------------------------------------
-    # Rendu
+    # Aperçu au survol dans la liste déroulante des polices
     # ------------------------------------------------------------------
+
+    def _enable_font_hover_preview(self, combo: ttk.Combobox) -> None:
+        """
+        Reproduit le comportement des menus de polices de Word/InDesign :
+        déplacer la souris sur un nom de police dans la liste déroulante
+        ouverte met à jour l'aperçu immédiatement, sans valider le choix
+        (le choix n'est validé que par clic/Entrée, comme avant).
+
+        Le Listbox interne du popdown d'un ttk.Combobox est créé entièrement
+        côté Tcl (proc ttk::combobox::PopdownWindow) : il n'existe jamais en
+        tant qu'objet Python, donc `nametowidget()` ne peut pas le résoudre
+        (ça lève KeyError sur le dernier segment du chemin, ex. 'popdown').
+        On contourne ça en appelant directement les commandes Tcl du widget
+        par son chemin texte (`combo.tk.call(path, ...)`), ce qui fonctionne
+        quelle que soit l'origine du widget. Implémentation défensive :
+        toute erreur est absorbée silencieusement, le comportement précédent
+        (sélection au clic uniquement) reste garanti.
+        """
+        state = {"listbox_path": None}
+
+        def _popdown_listbox_path():
+            try:
+                popdown = combo.tk.eval(f"ttk::combobox::PopdownWindow {combo}")
+                return f"{popdown}.f.l"
+            except Exception:
+                return None
+
+        def _clear_override():
+            if self._preview_font_override is not None:
+                self._preview_font_override = None
+                self._schedule_preview()
+
+        def _on_motion_tcl(y):
+            path = state["listbox_path"]
+            if not path:
+                return
+            try:
+                index = int(combo.tk.call(path, "nearest", int(float(y))))
+                if index < 0:
+                    return
+                value = combo.tk.call(path, "get", index)
+            except Exception:
+                return
+            if not value or value == self.text_font.get():
+                _clear_override()
+                return
+            if value != self._preview_font_override:
+                self._preview_font_override = value
+                self._schedule_preview()
+
+        def _on_leave_tcl():
+            _clear_override()
+
+        motion_cmd = combo.register(_on_motion_tcl)
+        leave_cmd = combo.register(_on_leave_tcl)
+
+        def _bind_listbox():
+            path = _popdown_listbox_path()
+            state["listbox_path"] = path
+            if not path:
+                return
+            try:
+                combo.tk.call("bind", path, "<Motion>", f"{motion_cmd} %y")
+                combo.tk.call("bind", path, "<Leave>", leave_cmd)
+            except Exception:
+                pass
+
+        def _on_postcommand_chain(previous):
+            def _wrapped():
+                if previous:
+                    try:
+                        previous()
+                    except Exception:
+                        pass
+                # Le popdown/listbox n'existe (ou n'est recréé) qu'à l'ouverture ;
+                # on (re)bind donc le survol à chaque ouverture de la liste.
+                self.after(10, _bind_listbox)
+            return _wrapped
+
+        try:
+            previous_cmd = combo.cget("postcommand")
+        except Exception:
+            previous_cmd = None
+        try:
+            combo.configure(postcommand=_on_postcommand_chain(previous_cmd))
+        except Exception:
+            # Si la configuration échoue pour une raison quelconque, on
+            # abandonne discrètement : le combobox continue de fonctionner
+            # normalement, juste sans aperçu au survol.
+            return
+
+        # En cas de fermeture de la liste sans sélection (Échap, clic ailleurs),
+        # on revient à la police réellement sélectionnée.
+        combo.bind("<<ComboboxSelected>>", lambda *_: _clear_override(), add="+")
+        combo.bind("<FocusOut>", lambda *_: _clear_override(), add="+")
 
     def _build_config(self) -> IconConfig:
         bg = BackgroundConfig(
@@ -387,7 +636,8 @@ class IcoMakerApp(tk.Tk):
             shape=self.bg_shape.get(),  # type: ignore[arg-type]
             corner_radius=self.bg_radius.get(),
         )
-        font_path = get_font_path(self.text_font.get())
+        font_name = self._preview_font_override or self.text_font.get()
+        font_path = get_font_path(font_name)
         text = TextConfig(
             text=self.text_str.get(),
             font_path=font_path,
@@ -454,7 +704,20 @@ class IcoMakerApp(tk.Tk):
         return [s for s, var in self.ico_sizes.items() if var.get()]
 
     def _output_dir(self) -> Path:
-        return Path(__file__).parent / "data" / "output"
+        """
+        Dossier proposé par défaut dans les boîtes de dialogue d'export.
+        En développement (lancé via `python ico_maker.py`), on garde
+        data/output à côté du script, pratique pour les tests. Une fois
+        empaqueté en .exe (PyInstaller définit alors `sys.frozen`),
+        data/output n'a plus de sens pour l'utilisateur final : on
+        propose à la place son dossier Téléchargements. Dans tous les
+        cas, l'utilisateur reste libre de choisir un autre dossier au
+        moment de l'export.
+        """
+        if getattr(sys, "frozen", False):
+            return _downloads_dir()
+        dev_dir = Path(__file__).parent / "data" / "output"
+        return dev_dir if dev_dir.is_dir() else _downloads_dir()
 
     def _export_ico(self):
         sizes = self._selected_sizes()

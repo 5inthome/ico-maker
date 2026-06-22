@@ -1,0 +1,20 @@
+# Bytecode / cache Python
+__pycache__/
+*.pyc
+
+# Artefacts de build PyInstaller
+build/
+dist/
+*.spec
+
+# Données de travail locales (favicons de test, exports personnels)
+data/
+
+# Fichier de métadonnées Windows (vues de dossier)
+desktop.ini
+
+# Version archivée avec messages de diagnostic (usage interne uniquement)
+ico_maker_debug.py
+
+# 
+IcoMaker.spec

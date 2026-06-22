@@ -183,15 +183,17 @@ class IconRenderer:
         if sizes is None:
             sizes = [16, 24, 32, 48, 64, 128, 256]
         base = self.render(cfg)
-        frames: list[Image.Image] = []
-        for s in sorted(sizes):
-            frame = base.resize((s, s), Image.LANCZOS)
-            frames.append(frame)
-        frames[0].save(
+        # Important : Pillow génère lui-même les variantes de taille à partir
+        # de l'image passée à .save(). Il faut donc appeler .save() sur
+        # l'image source (haute résolution), jamais sur une version déjà
+        # redimensionnée en petit format : Pillow ignore silencieusement
+        # toute taille demandée supérieure à celle de l'image sur laquelle
+        # .save() est appelé, ce qui ne conservait avant que la plus petite
+        # taille (ex: 16×16), d'où l'icône floue entourée de blanc.
+        base.save(
             dest,
             format="ICO",
             sizes=[(s, s) for s in sorted(sizes)],
-            append_images=frames[1:],
         )
 
     def export_png(self, cfg: IconConfig, dest: Path, size: int = 512) -> None:
@@ -211,12 +213,18 @@ class IconRenderer:
         if sizes is None:
             sizes = [16, 24, 32, 48, 64, 128, 256]
         img = Image.open(src).convert("RGBA")
-        frames = [img.resize((s, s), Image.LANCZOS) for s in sorted(sizes)]
-        frames[0].save(
+        max_size = max(sizes)
+        if img.width < max_size or img.height < max_size:
+            # Le PNG source est plus petit que la plus grande taille demandée :
+            # on l'agrandit d'abord, sinon Pillow ignorerait les tailles
+            # supérieures à la résolution de l'image sauvegardée.
+            img = img.resize((max_size, max_size), Image.LANCZOS)
+        # Même remarque que pour export_ico : on sauvegarde depuis l'image
+        # source en pleine résolution, jamais depuis une version réduite.
+        img.save(
             dest,
             format="ICO",
             sizes=[(s, s) for s in sorted(sizes)],
-            append_images=frames[1:],
         )
 
 
