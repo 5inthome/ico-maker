@@ -1,5 +1,5 @@
 # "Ico Maker" : Favicon Maker - Dessinateur d’Icons et Favicons 
-***Choose a font, colors, sizes and frames... Make .ico et .png, and convert .png to .ico***
+***Choose a font, colors, sizes and shapes... Make .ico et .png, and convert .png to .ico***
 
 ***Choisir police de caractère, couleurs, tailles et formes... produit les .ico et .png, et convertit .png en .ico***
 
