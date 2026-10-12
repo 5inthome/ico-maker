@@ -19,8 +19,9 @@ existant en .ico sans repasser par l'éditeur.
 Fonctionnalités notables :
   - saisie directe d'un code couleur hexadécimal (#rrggbb ou #rgb), en
     plus du sélecteur de couleur classique ;
-  - détection des polices Adobe Fonts activées via Creative Cloud
-    Desktop, en complément des polices du registre Windows
+  - fonctionne sous Windows et sous Linux (depuis la version 1.1) ;
+  - polices : registre Windows + Adobe Fonts activées via Creative
+    Cloud Desktop sous Windows, fontconfig sous Linux
     (voir utils/font_utils.py) ;
   - aperçu au survol dans la liste déroulante des polices, façon
     Word/InDesign : déplacer la souris sur un nom de police met à jour
@@ -31,14 +32,16 @@ Une version conservant les messages de diagnostic [hover-debug] utilisés
 pour mettre au point l'aperçu au survol est archivée localement (non
 publiée dans le dépôt) sous le nom ico_maker_debug.py.
 
-Lancement :  python ico_maker.py
-Dépendances : Pillow  (pip install Pillow)
+Lancement :  python ico_maker.py   (Linux : python3 ico_maker.py)
+Dépendances : Pillow  (pip install Pillow) ; sous Linux, Tkinter
+              s'installe à part (Mint/Ubuntu : sudo apt install python3-tk)
 """
 
 from __future__ import annotations
 
 import os
 import re
+import subprocess
 import sys
 import tkinter as tk
 from tkinter import colorchooser, filedialog, messagebox, ttk
@@ -56,6 +59,18 @@ from utils.font_utils import get_font_names, get_font_path
 # ---------------------------------------------------------------------------
 # Constantes UI
 # ---------------------------------------------------------------------------
+
+IS_WINDOWS    = sys.platform == "win32"
+
+# Polices de l'interface : Segoe UI / Consolas sous Windows ; sous Linux,
+# DejaVu (installée par défaut sur Mint, Ubuntu, Fedora).
+UI_FONT       = "Segoe UI" if IS_WINDOWS else "DejaVu Sans"
+MONO_FONT     = "Consolas" if IS_WINDOWS else "DejaVu Sans Mono"
+
+# Police présélectionnée au démarrage : la première trouvée dans cette liste
+# (nom exact), sinon la première police dont le nom contient « arial »,
+# sinon la première de la liste.
+DEFAULT_FONTS = ["Arial", "Liberation Sans", "DejaVu Sans", "Noto Sans"]
 
 PREVIEW_SIZE  = 256
 PAD           = 8
@@ -77,7 +92,7 @@ _HEX3_RE = re.compile(r"^[0-9A-Fa-f]{3}$")
 COLOR_INVALID_FG = "#f38ba8"
 
 # Informations affichées dans la boîte "À propos" (menu Aide).
-APP_VERSION = "1.0"
+APP_VERSION = "1.1"
 # Laisser vide tant que le projet n'est pas publié ; renseigner l'URL du
 # dépôt (ex: "https://github.com/utilisateur/ico-maker") une fois le
 # code mis en ligne pour qu'elle apparaisse automatiquement ci-dessous.
@@ -100,11 +115,27 @@ def _resource_path(name: str) -> Path:
 
 def _downloads_dir() -> Path:
     """
-    Dossier "Téléchargements" de l'utilisateur Windows. Lu depuis le
-    registre (Shell Folders, GUID FOLDERID_Downloads) pour respecter un
-    éventuel déplacement de ce dossier par l'utilisateur ; à défaut, on
-    retombe sur ~/Downloads, puis sur le dossier personnel.
+    Dossier "Téléchargements" de l'utilisateur.
+    - Windows : lu depuis le registre (Shell Folders, GUID
+      FOLDERID_Downloads) pour respecter un éventuel déplacement du dossier.
+    - Linux : demandé à `xdg-user-dir DOWNLOAD`, qui connaît le nom
+      localisé (~/Téléchargements sur un Mint en français).
+    À défaut, on retombe sur ~/Downloads, puis sur le dossier personnel.
     """
+    if not IS_WINDOWS:
+        try:
+            out = subprocess.run(
+                ["xdg-user-dir", "DOWNLOAD"],
+                capture_output=True, text=True, timeout=5, check=True,
+            ).stdout.strip()
+            path = Path(out)
+            if out and path.is_dir() and path != Path.home():
+                return path
+        except Exception:
+            pass
+        fallback = Path.home() / "Downloads"
+        return fallback if fallback.is_dir() else Path.home()
+
     try:
         import winreg
         key = winreg.OpenKey(
@@ -170,7 +201,15 @@ class IcoMakerApp(tk.Tk):
         self.resizable(False, False)
         self.configure(bg=BG_PANEL)
         try:
-            self.iconbitmap(default=str(_resource_path(ICON_FILENAME)))
+            icon_path = _resource_path(ICON_FILENAME)
+            if IS_WINDOWS:
+                self.iconbitmap(default=str(icon_path))
+            else:
+                # Sous Linux, iconbitmap n'accepte pas les .ico : on passe
+                # par Pillow. La référence est gardée (self._icon_photo),
+                # sinon l'image serait détruite par le ramasse-miettes.
+                self._icon_photo = ImageTk.PhotoImage(Image.open(icon_path))
+                self.iconphoto(True, self._icon_photo)
         except Exception:
             # Pas bloquant : l'appli fonctionne normalement sans icône
             # de fenêtre si le fichier .ico est introuvable.
@@ -258,7 +297,7 @@ class IcoMakerApp(tk.Tk):
         right.grid(row=0, column=1, sticky="nsew")
 
         tk.Label(right, text="Aperçu", fg=FG_ACCENT, bg=BG_PANEL,
-                 font=("Segoe UI", 11, "bold")).pack()
+                 font=(UI_FONT, 11, "bold")).pack()
 
         # Fond en damier pour simuler la transparence
         self.preview_canvas = tk.Canvas(
@@ -271,7 +310,7 @@ class IcoMakerApp(tk.Tk):
 
         tk.Button(right, text="⟳  Actualiser", command=self._update_preview,
                   bg=BG_SECTION, fg=FG_LABEL, relief="flat", cursor="hand2",
-                  font=("Segoe UI", 9)).pack()
+                  font=(UI_FONT, 9)).pack()
 
     # ------------------------------------------------------------------
     # Onglet Fond
@@ -360,20 +399,20 @@ class IcoMakerApp(tk.Tk):
         tk.Button(parent, text="💾  Exporter en .ico",
                   command=self._export_ico,
                   bg=BTN_EXPORT, fg="#1e1e2e", relief="flat", cursor="hand2",
-                  font=("Segoe UI", 10, "bold"), pady=6
+                  font=(UI_FONT, 10, "bold"), pady=6
                   ).pack(fill="x", padx=4, pady=4)
 
         tk.Button(parent, text="🖼  Exporter en .png",
                   command=self._export_png,
                   bg=FG_ACCENT, fg="#1e1e2e", relief="flat", cursor="hand2",
-                  font=("Segoe UI", 10, "bold"), pady=6
+                  font=(UI_FONT, 10, "bold"), pady=6
                   ).pack(fill="x", padx=4, pady=2)
 
         self._section(parent, "Convertir un PNG existant")
         tk.Button(parent, text="📂  PNG → ICO",
                   command=self._convert_png_to_ico,
                   bg=BTN_CONVERT, fg="#1e1e2e", relief="flat", cursor="hand2",
-                  font=("Segoe UI", 10, "bold"), pady=6
+                  font=(UI_FONT, 10, "bold"), pady=6
                   ).pack(fill="x", padx=4, pady=4)
 
     # ------------------------------------------------------------------
@@ -387,7 +426,7 @@ class IcoMakerApp(tk.Tk):
 
     def _section(self, parent, title: str):
         tk.Label(parent, text=title, fg=FG_ACCENT, bg=BG_SECTION,
-                 font=("Segoe UI", 9, "bold"), anchor="w"
+                 font=(UI_FONT, 9, "bold"), anchor="w"
                  ).pack(fill="x", padx=4, pady=(10, 2))
         tk.Frame(parent, height=1, bg="#44465a").pack(fill="x", padx=4, pady=(0, 4))
 
@@ -442,7 +481,7 @@ class IcoMakerApp(tk.Tk):
         # Champ de saisie du code couleur (#rrggbb ou #rgb), relié à color_var.
         entry = tk.Entry(row, textvariable=color_var, bg="#313244",
                          fg=FG_LABEL, insertbackground=FG_LABEL, width=9,
-                         relief="flat", font=("Consolas", 9))
+                         relief="flat", font=(MONO_FONT, 9))
         entry.pack(side="left", padx=4)
 
         def refresh(*_):
@@ -525,10 +564,9 @@ class IcoMakerApp(tk.Tk):
         names = get_font_names()
         self.font_combo["values"] = names
         if names:
-            # Tenter de présélectionner "Arial" ou la première disponible
-            default = next(
-                (n for n in names if "arial" in n.lower()), names[0]
-            )
+            # Présélection : voir DEFAULT_FONTS
+            default = next((n for n in DEFAULT_FONTS if n in names), None) \
+                or next((n for n in names if "arial" in n.lower()), names[0])
             self.text_font.set(default)
 
     # ------------------------------------------------------------------

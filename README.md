@@ -3,7 +3,7 @@
 
 ***Choisir police de caractère, couleurs, tailles et formes... produit les .ico et .png, et convertit .png en .ico***
 
-> **English summary** — Ico Maker is a small Tkinter desktop app for Windows that creates favicons and multi-size `.ico` files from scratch (background + shape + text), or converts an existing PNG into a multi-size `.ico`. Everything runs locally with Pillow — no network calls, no online service. A ready-to-run Windows executable is available on the [Releases](../../releases) page (no Python install required); see [Téléchargement](#téléchargement--download) below. The rest of this README is in French; open an issue if an English version of any section would help.
+> **English summary** — Ico Maker is a small Tkinter desktop app for Windows and Linux that creates favicons and multi-size `.ico` files from scratch (background + shape + text), or converts an existing PNG into a multi-size `.ico`. Everything runs locally with Pillow — no network calls, no online service. A ready-to-run Windows executable is available on the [Releases](../../releases) page (no Python install required); see [Téléchargement](#téléchargement--download) below. On Linux, run it from source (see [Installation sous Linux](#installation-sous-linux-mint-ubuntu-fedora)). The rest of this README is in French; open an issue if an English version of any section would help.
 
 Interface graphique Tkinter pour créer des favicons et fichiers `.ico` à partir de zéro (fond + texte + forme), ou pour convertir un PNG existant en `.ico` multi-tailles. Aucun service en ligne, aucune dépendance réseau : tout le rendu se fait localement avec Pillow.
 
@@ -24,6 +24,7 @@ Quelques exemples d'icônes réalisables avec l'application (fond + forme additi
 
 - **Sans Python (recommandé pour la plupart des utilisateurs)** : téléchargez `IcoMaker.exe` depuis la page [Releases](../../releases) du dépôt et lancez-le directement.
 - **Depuis le code source** (pour modifier ou contribuer) : voir [Installation sur PC Windows](#installation-sur-pc-windows) ci-dessous.
+- **Sous Linux** : pas d'exécutable, l'application se lance depuis le code source ; voir [Installation sous Linux](#installation-sous-linux-mint-ubuntu-fedora).
 
 ## Présentation
 
@@ -31,7 +32,7 @@ L'application affiche un panneau de réglages à gauche (organisé en quatre ong
 
 1. **Fond** — une forme pleine (carré, carré à coins arrondis, cercle, ou aucun fond) dans une couleur avec opacité réglable.
 2. **Forme additionnelle** (optionnelle) — une figure géométrique (cercle, carré, triangle, losange, pentagone, hexagone, étoile) positionnable et redimensionnable, posée par-dessus le fond.
-3. **Texte** — une lettre ou un mot, avec choix de police (parmi celles installées sur Windows, y compris les polices Adobe Fonts activées via Creative Cloud), taille, couleur, opacité et décalage.
+3. **Texte** — une lettre ou un mot, avec choix de police (parmi celles installées sur le système : sous Windows, y compris les polices Adobe Fonts activées via Creative Cloud ; sous Linux, toutes celles que connaît fontconfig), taille, couleur, opacité et décalage.
 
 Le rendu interne se fait sur un canevas carré de 256×256, puis est redimensionné à l'export selon les tailles choisies.
 
@@ -52,7 +53,7 @@ Le rendu interne se fait sur un canevas carré de 256×256, puis est redimension
 
 - `ico_maker.py` — point d'entrée, interface graphique complète.
 - `utils/renderer.py` — moteur de rendu Pillow (fond, formes, texte) et fonctions d'export (`export_ico`, `export_png`, `png_to_ico`).
-- `utils/font_utils.py` — détection des polices disponibles (registre Windows + cache Adobe Creative Cloud).
+- `utils/font_utils.py` — détection des polices disponibles : registre Windows + cache Adobe Creative Cloud sous Windows, fontconfig (`fc-list`) sous Linux.
 - `diagnose_adobe_fonts.py` — script de diagnostic autonome à lancer en cas de souci de détection des polices Adobe (affiche le contenu brut du cache Creative Cloud).
 - `data/output/` — dossier proposé par défaut pour l'enregistrement des fichiers exportés.
 
@@ -85,6 +86,40 @@ Lancer depuis une console plutôt qu'en double-cliquant sur le fichier permet de
 - **Export .ico et tailles multiples** : Pillow génère lui-même les variantes de taille à partir de l'image de rendu en pleine résolution (256×256) — il ne faut donc jamais modifier le code pour appeler la sauvegarde sur une image déjà réduite, sous peine de ne conserver que les plus petites tailles cochées (icône floue entourée d'une bordure blanche).
 - **Caractères accentués / emojis dans l'interface** : les onglets utilisent des emojis (🎨 🔤 ⬡ 💾) à titre décoratif ; si la police système par défaut de Windows ne les affiche pas correctement, cela n'affecte pas le fonctionnement de l'application.
 - **Aperçu au survol des polices** : cette fonctionnalité s'appuie sur des mécanismes internes de Tcl/Tk (non documentés officiellement par Tkinter) pour accéder à la liste déroulante ouverte. Le code est conçu pour échouer silencieusement si la structure interne diffère selon la version de Tk installée — dans ce cas, la sélection au clic continue de fonctionner normalement, seul l'aperçu au survol est indisponible.
+
+## Installation sous Linux (Mint, Ubuntu, Fedora)
+
+Depuis la version 1.1, l'application fonctionne aussi sous Linux, lancée depuis le code source.
+
+### Prérequis
+
+Python 3 est déjà présent. Il faut ajouter Tkinter et Pillow :
+
+- **Linux Mint / Ubuntu / Debian** :
+
+  ```
+  sudo apt install python3-tk python3-pil python3-pil.imagetk
+  ```
+
+- **Fedora** :
+
+  ```
+  sudo dnf install python3-tkinter python3-pillow python3-pillow-tk
+  ```
+
+### Lancement
+
+Dans le dossier du projet (dans le gestionnaire de fichiers : clic droit → *Ouvrir dans un terminal*) :
+
+```
+python3 ico_maker.py
+```
+
+### Différences avec Windows
+
+- **Polices** : la liste vient de fontconfig (`fc-list`), qui connaît les polices du système et celles de l'utilisateur. Pour ajouter une police, copiez ses fichiers `.ttf` ou `.otf` dans `~/.local/share/fonts` (ou double-cliquez dessus et choisissez *Installer*), puis relancez l'application. Les polices Adobe Fonts ne sont pas disponibles sous Linux : Creative Cloud n'y existe pas, et leur licence interdit de copier leurs fichiers.
+- **Dossier d'export par défaut** : comme sous Windows, `data/output/` s'il existe à côté du script ; sinon le dossier Téléchargements donné par `xdg-user-dir` (`~/Téléchargements` sur un système en français).
+- **Police de l'interface** : DejaVu Sans à la place de Segoe UI.
 
 ## Licence
 
