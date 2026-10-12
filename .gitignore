@@ -18,3 +18,6 @@ ico_maker_debug.py
 
 # 
 IcoMaker.spec
+
+# la ligne ci-dessous n’est pas indispensable parce que ce qu’elle exclut l’est déjà au plan global de MINT dans ~/.config/git
+.directory

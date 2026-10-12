@@ -1,16 +1,29 @@
 """
 font_utils.py
-Énumération des polices TrueType/OpenType installées sur Windows,
-y compris les polices Adobe Creative Cloud.
+Énumération des polices TrueType/OpenType installées.
+
+- Windows : registre (HKLM + HKCU), complété par les polices Adobe Fonts
+  activées via Creative Cloud (cache local, voir _scan_adobe_fonts).
+- Linux : fontconfig (commande `fc-list`), qui connaît les polices du
+  système et celles de l'utilisateur (~/.local/share/fonts) ; à défaut,
+  parcours direct des dossiers de polices habituels.
 """
 
 import os
+import shutil
+import subprocess
 import sys
-import winreg
 from pathlib import Path
 from functools import lru_cache
 
 from PIL import ImageFont
+
+IS_WINDOWS = sys.platform == "win32"
+
+if IS_WINDOWS:
+    # winreg n'existe que sous Windows : l'importer sans condition fait
+    # planter l'application au démarrage sur tout autre système.
+    import winreg
 
 
 # Répertoires de polices standard Windows
@@ -19,7 +32,7 @@ _FONT_DIRS = [
     Path(os.environ.get("LOCALAPPDATA", "")) / "Microsoft" / "Windows" / "Fonts",
 ]
 
-# Clés de registre contenant les polices installées
+# Clés de registre contenant les polices installées (Windows uniquement)
 _REGISTRY_KEYS = [
     # Polices système (HKLM)
     (winreg.HKEY_LOCAL_MACHINE,
@@ -27,6 +40,15 @@ _REGISTRY_KEYS = [
     # Polices utilisateur (HKCU) – inclut Adobe Fonts via Creative Cloud
     (winreg.HKEY_CURRENT_USER,
      r"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Fonts"),
+] if IS_WINDOWS else []
+
+# Dossiers de polices habituels sous Linux (utilisés seulement si
+# fontconfig/fc-list n'est pas disponible).
+_LINUX_FONT_DIRS = [
+    Path("/usr/share/fonts"),
+    Path("/usr/local/share/fonts"),
+    Path.home() / ".local" / "share" / "fonts",
+    Path.home() / ".fonts",
 ]
 
 _VALID_EXT = {".ttf", ".otf", ".ttc"}
@@ -115,13 +137,66 @@ def _scan_adobe_fonts() -> dict[str, Path]:
     return fonts
 
 
-@lru_cache(maxsize=1)
-def get_font_map() -> dict[str, Path]:
+def _display_name(family: str, style: str) -> str:
+    """'DejaVu Sans' + 'Bold' -> 'DejaVu Sans Bold' ; le style Regular est omis."""
+    if not style or style.lower() in ("regular", "normal", "book", "roman"):
+        return family
+    return f"{family} {style}"
+
+
+def _scan_fontconfig() -> dict[str, Path] | None:
     """
-    Retourne un dict {nom_affichage: chemin_absolu} pour toutes les polices
-    TTF/OTF trouvées dans le registre Windows, fusionnées avec les polices
-    Adobe Fonts détectées dans le cache Creative Cloud.
-    Fusionnes les clés HKLM et HKCU ; HKCU (Adobe CC classique) a priorité
+    Linux : interroge fontconfig via `fc-list`. Renvoie None si la commande
+    est absente ou échoue (on se rabat alors sur _scan_font_dirs).
+    Pour chaque fichier, fontconfig fournit la famille et le style ; on
+    garde le premier nom de chaque liste (fontconfig en donne parfois
+    plusieurs, dans différentes langues).
+    """
+    if not shutil.which("fc-list"):
+        return None
+    try:
+        out = subprocess.run(
+            ["fc-list", "--format", "%{file}\t%{family[0]}\t%{style[0]}\n"],
+            capture_output=True, text=True, timeout=30, check=True,
+        ).stdout
+    except Exception:
+        return None
+    fonts: dict[str, Path] = {}
+    for line in out.splitlines():
+        parts = line.split("\t")
+        if len(parts) != 3:
+            continue
+        file, family, style = parts
+        path = Path(file)
+        if path.suffix.lower() not in _VALID_EXT or not family:
+            continue
+        fonts.setdefault(_display_name(family, style), path)
+    return fonts
+
+
+def _scan_font_dirs() -> dict[str, Path]:
+    """Linux, solution de secours : lit les noms directement dans les fichiers."""
+    fonts: dict[str, Path] = {}
+    for base in _LINUX_FONT_DIRS:
+        if not base.is_dir():
+            continue
+        for path in sorted(base.rglob("*")):
+            if path.suffix.lower() not in _VALID_EXT or not path.is_file():
+                continue
+            try:
+                family, style = ImageFont.truetype(str(path), size=10).getname()
+            except Exception:
+                continue
+            if family:
+                fonts.setdefault(_display_name(family, style), path)
+    return fonts
+
+
+def _windows_font_map() -> dict[str, Path]:
+    """
+    Windows : toutes les polices TTF/OTF du registre, fusionnées avec les
+    polices Adobe Fonts détectées dans le cache Creative Cloud.
+    Fusionne les clés HKLM et HKCU ; HKCU (Adobe CC classique) a priorité
     en cas de doublon.
     """
     fonts: dict[str, Path] = {}
@@ -159,6 +234,20 @@ def get_font_map() -> dict[str, Path]:
     except Exception:
         pass
 
+    return fonts
+
+
+@lru_cache(maxsize=1)
+def get_font_map() -> dict[str, Path]:
+    """
+    Retourne un dict {nom_affichage: chemin_absolu} des polices disponibles
+    sur le système courant (Windows ou Linux).
+    """
+    if IS_WINDOWS:
+        return _windows_font_map()
+    fonts = _scan_fontconfig()
+    if fonts is None:
+        fonts = _scan_font_dirs()
     return fonts
 
 
